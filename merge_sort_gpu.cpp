@@ -101,9 +101,12 @@ int main(int argc, char**argv) {
 
   int compute_units = 24;
   if (argc == 2) {
+    // First argument is compute_units, if any.
+    // To run on single GPU core, use compute_units = 1.
+    // To run on CPU, use compute_units = -1.
     char *endptr = NULL;
     long int arg = std::strtol(argv[1], &endptr, 10);
-    if (arg > 0) {
+    if (arg != 0) {
       compute_units = static_cast<int>(arg);
     }
   }
@@ -112,37 +115,43 @@ int main(int argc, char**argv) {
   int chunk_size = array.size() / compute_units;
 
   auto chrono_start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < compute_units; ++i) {
-    kernel.setArg(2, i * chunk_size);
-    kernel.setArg(3, (i + 1) * chunk_size);
+  if (compute_units > 0) {
+    for (int i = 0; i < compute_units; ++i) {
+      kernel.setArg(2, i * chunk_size);
+      kernel.setArg(3, (i + 1) * chunk_size);
 
-    // Step 5: Enqueue the kernel for execution
-    state.queue.enqueueNDRangeKernel(kernel, cl::NDRange(i), global_size, local_size);
+      // Step 5: Enqueue the kernel for execution
+      state.queue.enqueueNDRangeKernel(kernel, cl::NDRange(i), global_size, local_size);
+    }
+
+    // Step 6: Wait for the kernel to finish executing
+    auto status = state.queue.finish();
+    if (status != CL_SUCCESS) {
+      std::cerr << "Computation status: " << invert_error(status) << std::endl;
+    }
+
+    // Step 7: Read the results back from the device
+    state.queue.enqueueReadBuffer(array_message, CL_TRUE, 0, sizeof(int) * array.size(), array.data());
+
+    // Step 8: Do one last merge on the highest level
   }
-
-  // Step 6: Wait for the kernel to finish executing
-  auto status = state.queue.finish();
-  if (status != CL_SUCCESS) {
-    std::cerr << "Computation status: " << invert_error(status) << std::endl;
-  }
-
-  // Step 7: Read the results back from the device
-  std::vector<int> result(array.size());
-  state.queue.enqueueReadBuffer(array_message, CL_TRUE, 0, sizeof(int) * array.size(), result.data());
-
-  // Step 8: Do one last merge on the highest level
 
   auto chrono_end = std::chrono::high_resolution_clock::now();
 
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>
+  auto duration1 = std::chrono::duration_cast<std::chrono::microseconds>
     (chrono_end - chrono_start);
 
-  // todo: measure
-  merge_sort_bottom_up(result, buffer, 0, result.size(), chunk_size);
+  chrono_start = std::chrono::high_resolution_clock::now();
+  if (compute_units < 0) chunk_size = 1;
+  merge_sort_bottom_up(array, buffer, 0, array.size(), chunk_size);
+  chrono_end = std::chrono::high_resolution_clock::now();
+  auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>
+    (chrono_end - chrono_start);
 
-  std::cerr << "Time taken by function: " << duration.count() << " microseconds" << std::endl;
+  std::cerr << "Time taken by GPU: " << duration1.count() << " us" << std::endl;
+  std::cerr << "Time taken by CPU: " << duration2.count() << " us" << std::endl;
 
-  for (int el : result) {
+  for (int el : array) {
     std::cout << el << std::endl;
   }
 
