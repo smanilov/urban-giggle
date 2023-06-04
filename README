@@ -1,0 +1,14 @@
+INSTALL
+
+1. install intel-compute-runtime
+2. install ocl-icd
+3. install opencl-headers
+4. install clinfo
+5. install opencl-clhpp
+
+USE
+
+./build.sh && ./a.out 256 < input1.txt > sorted256.txt
+./build.sh && ./a.out 64 < input1.txt > sorted64.txt
+diff sorted64.txt sorted256.txt
+
